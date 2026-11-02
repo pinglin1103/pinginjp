@@ -28,7 +28,7 @@ $('mount').innerHTML=`<header class="bar"><div class="wrap gut">
 let cart=[];try{cart=JSON.parse(localStorage.getItem('pj_cart')||'[]')}catch(e){}
 const visible=()=>CAT.products.filter(p=>!p.hidden);
 function saveCart(){try{localStorage.setItem('pj_cart',JSON.stringify(cart))}catch(e){};$('cartCount').textContent=cart.reduce((a,l)=>a+l.qty,0)}
-let cat='全部',q='';
+let cat='全部',brand='全部',stock='全部',sort='new',q='';
 function toast(t,ms){const el=$('toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,ms||1800)}
 function phHTML(p,color,small){
   const c=(p.colors||[]).find(x=>x.name===color)||(p.colors||[])[0]||{swatch:'#9b958f',name:''};
@@ -44,23 +44,65 @@ function renderChrome(){
 }
 
 function renderList(){
-  const V=visible();
-  const cats=['全部',...new Set(V.map(p=>p.category).filter(Boolean))];
-  if(!cats.includes(cat))cat='全部';
   $('view').innerHTML=`<div class="hero"><h1>日本正品代購</h1><p>挑好款式加入購物車，結帳後把訂單截圖私訊給我就完成了。${esc(CAT.shop.eta||'')}</p></div>
-  <div class="search"><input type="search" id="q" placeholder="搜尋品牌、商品名稱，例如：X-girl、福袋、後背包" value="${esc(q)}" aria-label="搜尋商品" autocomplete="off"></div>
-  ${cats.length>2?`<div class="chips">${cats.map(c=>`<button class="chip" type="button" data-c="${esc(c)}" aria-pressed="${c===cat}">${esc(c)}</button>`).join('')}</div>`:''}
-  <div class="grid" id="grid"></div>`;
+  <div class="shopwrap">
+    <aside class="side" id="side" aria-label="篩選商品">
+      <div class="side-hd"><b>篩選商品</b><button class="x" type="button" id="sideClose" aria-label="關閉">✕</button></div>
+      <div id="sideBody"></div>
+      <div class="side-ft"><button class="ghost sm" type="button" id="sideReset">清除篩選</button><button type="button" class="sm" id="sideDone">看商品</button></div>
+    </aside>
+    <div class="shopmain">
+      <div class="toolbar">
+        <div class="search"><input type="search" id="q" placeholder="搜尋品牌、商品名稱，例如：X-girl、福袋" value="${esc(q)}" aria-label="搜尋商品" autocomplete="off"></div>
+        <button class="ghost sm filterbtn" type="button" id="sideOpen">篩選<span id="fCount"></span></button>
+        <select id="sort" aria-label="排序"><option value="new">最新上架</option><option value="asc">價格低→高</option><option value="desc">價格高→低</option></select>
+      </div>
+      <div class="afil" id="afil"></div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+  <div class="scrim" id="sideScrim" hidden></div>`;
   const qi=$('q');qi.addEventListener('input',()=>{q=qi.value;drawGrid()});
-  document.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{cat=b.dataset.c;document.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed',x===b));drawGrid()});
+  $('sort').value=sort;$('sort').onchange=e=>{sort=e.target.value;drawGrid()};
+  const open=v=>{$('side').classList.toggle('open',v);$('sideScrim').hidden=!v;document.body.classList.toggle('noscroll',v)};
+  $('sideOpen').onclick=()=>open(true);$('sideClose').onclick=()=>open(false);$('sideScrim').onclick=()=>open(false);$('sideDone').onclick=()=>open(false);
+  $('sideReset').onclick=()=>{cat='全部';brand='全部';stock='全部';q='';qi.value='';drawGrid()};
   drawGrid();
 }
-function drawGrid(){
+const hasSt=(p,st)=>p.colors.some(c=>Object.values(c.sizes).includes(st));
+function filtered(skip){
   const words=q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const list=visible().filter(p=>cat==='全部'||p.category===cat).filter(p=>{const h=[p.brand,p.name,p.nameJa,p.category,p.desc,(p.colors||[]).map(c=>c.name).join(' ')].join(' ').toLowerCase();return words.every(w=>h.includes(w))});
+  return visible().filter(p=>(skip==='cat'||cat==='全部'||p.category===cat)&&(skip==='brand'||brand==='全部'||p.brand===brand)
+    &&(skip==='stock'||stock==='全部'||(stock==='現貨'?hasSt(p,'in'):hasSt(p,'pre'))))
+    .filter(p=>{const h=[p.brand,p.name,p.nameJa,p.category,p.desc,(p.colors||[]).map(c=>c.name).join(' ')].join(' ').toLowerCase();return words.every(w=>h.includes(w))});
+}
+function drawSide(){
+  const V=visible();
+  const group=(title,key,vals,cur)=>{const base=filtered(key);
+    const opts=['全部',...vals].map(v=>{const n=v==='全部'?base.length:base.filter(p=>key==='cat'?p.category===v:key==='brand'?p.brand===v:(v==='現貨'?hasSt(p,'in'):hasSt(p,'pre'))).length;
+      if(!n&&v!==cur)return '';return `<li><button type="button" class="sopt" data-g="${key}" data-v="${esc(v)}" aria-pressed="${v===cur}" ${n||v===cur?'':'disabled'}><span>${esc(v)}</span><small>${n}</small></button></li>`}).join('');
+    return `<div class="sgroup"><h3>${title}</h3><ul>${opts}</ul></div>`};
+  const cats=[...new Set(V.map(p=>p.category).filter(Boolean))],brands=[...new Set(V.map(p=>p.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const sts=['現貨','預購'].filter(st=>V.some(p=>hasSt(p,st==='現貨'?'in':'pre')));
+  $('sideBody').innerHTML=group('分類','cat',cats,cat)+(brands.length>1?group('品牌','brand',brands,brand):'')+(sts.length>1?group('狀態','stock',sts,stock):'');
+  $('sideBody').querySelectorAll('.sopt').forEach(b=>b.onclick=()=>{const g=b.dataset.g,v=b.dataset.v;if(g==='cat')cat=v;else if(g==='brand')brand=v;else stock=v;drawGrid()});
+  const act=[['cat',cat],['brand',brand],['stock',stock]].filter(x=>x[1]!=='全部');
+  $('fCount').textContent=act.length?`（${act.length}）`:'';
+  $('afil').innerHTML=act.map(([g,v])=>`<button type="button" class="chip" data-clr="${g}" aria-pressed="true">${esc(v)} ✕</button>`).join('');
+  $('afil').querySelectorAll('[data-clr]').forEach(b=>b.onclick=()=>{const g=b.dataset.clr;if(g==='cat')cat='全部';else if(g==='brand')brand='全部';else stock='全部';drawGrid()});
+}
+function drawGrid(){
+  const V=visible();
+  if(cat!=='全部'&&!V.some(p=>p.category===cat))cat='全部';
+  if(brand!=='全部'&&!V.some(p=>p.brand===brand))brand='全部';
+  drawSide();
+  let list=filtered();
+  if(sort==='asc')list=[...list].sort((a,b)=>a.price-b.price);else if(sort==='desc')list=[...list].sort((a,b)=>b.price-a.price);
+  const any=q.trim()||cat!=='全部'||brand!=='全部'||stock!=='全部';
+  $('sideDone').textContent=`看 ${list.length} 件商品`;
   $('grid').innerHTML=`${list.map(p=>`<a class="card" href="#item-${esc(p.id)}">${phHTML(p,(p.colors[0]||{}).name)}
-    <div class="body"><span class="brand">${esc(p.brand)}${p.colors.some(c=>Object.values(c.sizes).includes('pre'))?'<span class="tag">預購</span>':''}</span><h3>${esc(p.name)}</h3><span class="price">${money(p.price)}</span>
-    <div class="dots">${p.colors.map(c=>`<i style="background:${esc(c.swatch)}" title="${esc(c.name)}"></i>`).join('')}</div></div></a>`).join('')||`<p class="empty" style="grid-column:1/-1">${words.length?'找不到符合「'+esc(q.trim())+'」的商品，換個關鍵字試試。':'目前沒有商品'}</p>`}`;
+    <div class="body"><span class="brand">${esc(p.brand)}${hasSt(p,'pre')?'<span class="tag">預購</span>':''}</span><h3>${esc(p.name)}</h3><span class="price">${money(p.price)}</span>
+    <div class="dots">${p.colors.map(c=>`<i style="background:${esc(c.swatch)}" title="${esc(c.name)}"></i>`).join('')}</div></div></a>`).join('')||`<p class="empty" style="grid-column:1/-1">${any?'找不到符合的商品，換個關鍵字或清除篩選試試。':'目前沒有商品'}</p>`}`;
 }
 
 function renderItem(p){
@@ -119,7 +161,8 @@ function renderCart(step){
     $('dBody').innerHTML=`<label class="f">名字或 IG 帳號<input id="bName" value="${esc(buyer.name||'')}" autocomplete="name"></label>
       <label class="f">手機<input id="bPhone" value="${esc(buyer.phone||'')}" inputmode="tel" autocomplete="tel"></label>
       <label class="f">備註（選填，例如：想要的寄送方式）<textarea id="bNote" rows="3">${esc(buyer.note||'')}</textarea></label>
-      <p class="howto">付款與寄送方式會在你私訊後由小編告知，這裡不用填付款資料。</p>`;
+      ${payHTML()}
+      <p class="howto">寄送方式會在你私訊後由小編告知，這裡不用填付款資料。</p>`;
     $('dFoot').innerHTML=`<div class="sum"><span>合計 ${L.reduce((a,l)=>a+l.qty,0)} 件</span><span class="price">${money(total())}</span></div>
       <div class="msg warn" id="bMsg"></div>
       <div class="btnrow"><button class="ghost" type="button" id="toCart">回購物車</button><button type="button" id="mk">產生訂單</button></div>`;
@@ -151,17 +194,18 @@ function renderCart(step){
 function orderText(o){
   return [`【${CAT.shop.name}】訂單 ${o.no}`,`日期：${o.date}`,`訂購人：${o.buyer.name}${o.buyer.phone?'／'+o.buyer.phone:''}`,'',
     ...o.lines.map((l,i)=>`${i+1}. ${l.brand} ${l.name}\n   ${l.color}／${l.size} × ${l.qty}　${money(l.price*l.qty)}${l.st==='order'?'（需調貨）':''}`),
-    '',`合計：${money(o.total)}`,o.buyer.note?`備註：${o.buyer.note}`:''].filter(x=>x!=='').join('\n');
+    '',`合計：${money(o.total)}`,o.buyer.note?`備註：${o.buyer.note}`:'','',`付款：${payText()}`].filter(x=>x!=='').join('\n');
 }
 function renderSlip(){
   const o=lastOrder,S=CAT.shop;
   $('dTitle').textContent='訂單已產生';
-  $('dBody').innerHTML=`<p class="howto"><b>最後一步：</b>把下面這張訂單<b>截圖</b>（或按「複製訂單」），私訊給小編。收到後會回覆付款方式，付款完成才算訂購成功。</p>
+  $('dBody').innerHTML=`<p class="howto"><b>最後一步：</b>把下面這張訂單<b>截圖</b>（或按「複製訂單」），私訊給小編，並完成付款。</p>${payHTML()}
   <div class="slip" id="slip"><div class="hd"><b>${esc(S.name)}</b><span class="no">${esc(o.no)}</span></div>
     <div class="who">${esc(o.date)}　訂購人：${esc(o.buyer.name)}${o.buyer.phone?'／'+esc(o.buyer.phone):''}</div>
     <table>${o.lines.map(l=>`<tr><td>${esc(l.brand)} ${esc(l.name)}<br><span class="who">${esc(l.color)}／${esc(l.size)} × ${l.qty}${l.st==='order'?'（需調貨）':''}</span></td><td class="n">${money(l.price*l.qty)}</td></tr>`).join('')}</table>
     <div class="tot"><span>合計</span><span>${money(o.total)}</span></div>
-    ${o.buyer.note?`<div class="who">備註：${esc(o.buyer.note)}</div>`:''}</div>`;
+    ${o.buyer.note?`<div class="who">備註：${esc(o.buyer.note)}</div>`:''}
+    <div class="who" style="margin-top:6px">付款：${esc(payText())}</div></div>`;
   const ig=S.ig?`<a class="btn solid" href="https://ig.me/m/${encodeURIComponent(S.ig)}" target="_blank" rel="noopener">私訊 IG @${esc(S.ig)}</a>`:'';
   const line=S.line?`<a class="btn solid" href="https://line.me/R/ti/p/${encodeURIComponent(S.line)}" target="_blank" rel="noopener">傳 LINE</a>`:'';
   $('dFoot').innerHTML=`<div class="btnrow"><button class="ghost" type="button" id="cp">複製訂單</button>${ig}${line}</div>
@@ -202,7 +246,7 @@ function imgSrc(s){
 }
 function buildCatalog(P,I,S,all){
   const shop={notice:[]};
-  S.forEach(r=>{const k=r['項目'],v=r['內容']||'';if(k==='商店名稱')shop.name=v;else if(k==='IG帳號')shop.ig=v.replace(/^@/,'');else if(k==='LINE ID')shop.line=v;else if(k==='到貨說明')shop.eta=v;else if(k==='代購須知'&&v)shop.notice.push(v);else if(k==='後台網址')shop.api=v.trim()});
+  S.forEach(r=>{const k=r['項目'],v=r['內容']||'';if(k==='商店名稱')shop.name=v;else if(k==='IG帳號')shop.ig=v.replace(/^@/,'');else if(k==='LINE ID')shop.line=v;else if(k==='到貨說明')shop.eta=v;else if(k==='代購須知'&&v)shop.notice.push(v);else if(k==='後台網址')shop.api=v.trim();else if(k==='付款說明'&&v)shop.pay=v});
   const inv={};
   I.forEach(r=>{const id=r['商品ID'];if(!id||!r['顏色'])return;const L=inv[id]||(inv[id]=[]);
     let c=L.find(x=>x.name===r['顏色']);if(!c){c={name:r['顏色'],swatch:/^#[0-9a-f]{3,6}$/i.test(r['色塊'])?r['色塊']:'#a39e99',sizes:{}};L.push(c)}
@@ -228,6 +272,9 @@ async function loadLive(){
   try{localStorage.setItem('pj_cat',JSON.stringify(c))}catch(e){}
   return c;
 }
+const PAY_DEFAULT='要匯款至 (808)0820968201166 或 LINE PAY $500 訂金，才算訂購完成唷～';
+const payText=()=>(CAT.shop&&CAT.shop.pay)||PAY_DEFAULT;
+const payHTML=()=>`<div class="msg warn" style="font-size:14px;line-height:1.6;padding:10px 12px;border-radius:8px;background:var(--ai-soft)"><b>付款方式</b><br>${esc(payText())}</div>`;
 const apiURL=()=>CONFIG.API_URL||CAT.shop.api||'';
 async function sendOrder(o){
   if(!apiURL())return;
